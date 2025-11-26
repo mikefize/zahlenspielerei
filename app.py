@@ -42,8 +42,7 @@ def lighten_color(color, amount=0.5):
 @st.cache_data
 def load_data(filename, index_col_name=None, sep=";", decimal=","):
     try:
-        # engine='python' ist robuster bei CSVs mit viel Text (Beschreibung)
-        df = pd.read_csv(filename, sep=sep, decimal=decimal, engine='python')
+        df = pd.read_csv(filename, sep=sep, decimal=decimal, engine='python') # engine python für robustes Parsing
         df = clean_column_names(df)
         
         if "15minuten" in filename or "20minuten" in filename:
@@ -57,12 +56,9 @@ def load_data(filename, index_col_name=None, sep=";", decimal=","):
             if clean_idx in df.columns:
                 df = df.dropna(subset=[clean_idx])
             else:
-                # Fallback: Erste Spalte nehmen
                 df = df.dropna(subset=[df.columns[0]])
         
         if index_col_name != "Modell": 
-            # Versuche alles in Zahlen zu wandeln, außer Modell-Spalte
-            # ignore errors, damit Text in Beschreibung nicht zu NaN wird
             cols = df.columns.drop(index_col_name) if index_col_name in df.columns else df.columns[1:]
             df[cols] = df[cols].apply(pd.to_numeric, errors='coerce')
             
@@ -113,7 +109,6 @@ all_motors = sorted(list(motors_all))
 colors_palette = px.colors.qualitative.Bold + px.colors.qualitative.Prism + px.colors.qualitative.Vivid
 motor_color_map = {motor: colors_palette[i % len(colors_palette)] for i, motor in enumerate(all_motors)}
 
-# Indexierung robuster machen
 try:
     idx_250 = (df_leistung[df_leistung.columns[0]] - 250).abs().idxmin()
     ref_power_map = df_leistung.loc[idx_250].to_dict()
@@ -157,30 +152,43 @@ if current_topic == "Motor-Steckbriefe":
             meta_data_found = True
             def gv(c): return meta.iloc[0][c] if c in meta.columns else "-"
 
-            # 1. BESCHREIBUNG (Ganz oben, prominent)
-            desc = gv("Beschreibung")
-            if desc != "-" and pd.notna(desc):
-                st.info(desc) # Blaue Box
+            # OBERER BEREICH: Beschreibung (Links) + Bild (Rechts)
+            col_desc, col_img = st.columns([2, 1])
             
-            # 2. KENNZAHLEN
-            c1, c2, c3 = st.columns(3)
-            # Hersteller aus Namen raten, falls nicht in CSV
-            hersteller = selected_single.split(" ")[0] 
-            
-            with c1: st.metric("Hersteller", hersteller)
-            with c2: st.metric("Gewicht", f"{gv('Gewicht (kg)')} kg")
-            with c3: st.metric("Max. Drehmoment", f"{gv('Max. Drehmoment (Nm)')} Nm")
+            with col_desc:
+                # Beschreibung
+                desc = gv("Beschreibung")
+                if desc != "-" and pd.notna(desc):
+                    st.info(desc)
+                
+                # KENNZAHLEN (Jetzt in einer Reihe unter der Beschreibung)
+                kpi1, kpi2, kpi3 = st.columns(3)
+                with kpi1: st.metric("Gewicht", f"{gv('Gewicht (kg)')} kg")
+                with kpi2: st.metric("Max. Drehmoment", f"{gv('Max. Drehmoment (Nm)')} Nm")
+                
+                # Max Leistung (Berechnet aus Messdaten)
+                max_p = 0
+                if selected_single in df_leistung.columns:
+                    max_p = df_leistung[selected_single].max()
+                with kpi3: st.metric("Max. Leistung (gemessen)", f"{max_p:.0f} W" if max_p > 0 else "-")
 
-            # Link zur Herstellerseite
-            link_web = gv("Link_Hersteller")
-            if link_web != "-" and str(link_web).startswith("http"):
-                st.caption(f"[🌐 Zur Herstellerseite]({link_web})")
+                # Link Hersteller
+                link_web = gv("Link_Hersteller")
+                if link_web != "-" and str(link_web).startswith("http"):
+                    st.caption(f"[🌐 Zur Herstellerseite]({link_web})")
+
+            with col_img:
+                # BILD ANZEIGEN
+                img_file = gv("Bild")
+                if img_file != "-" and pd.notna(img_file):
+                    if os.path.exists(img_file):
+                        st.image(img_file, use_container_width=True)
             
             st.markdown("---")
 
     # 3. DIAGRAMME
     st.subheader("Messdaten")
-    cL, cK, cT = st.columns(3) # Jetzt 3 Spalten für Thermik
+    cL, cK, cT = st.columns(3)
     motor_color = motor_color_map.get(selected_single, "blue")
     
     with cL:
@@ -198,19 +206,17 @@ if current_topic == "Motor-Steckbriefe":
             st.plotly_chart(fig, use_container_width=True, config=plotly_config)
             
     with cT:
-        # Thermik (15 min Ausschnitt)
         if df_thermik is not None and selected_single in df_thermik.columns:
              start_t = df_thermik["Time"].min()
              end_t = start_t + pd.Timedelta(minutes=15)
              df_15 = df_thermik[(df_thermik["Time"] >= start_t) & (df_thermik["Time"] <= end_t)]
-             
              fig = px.line(df_15, x="Time", y=selected_single, title="Thermik (15 min)")
              fig.update_traces(fill='tozeroy', line_color=motor_color)
              fig.update_xaxes(tickformat="%M:%S")
              fig = lock_chart(add_watermark(fig))
              st.plotly_chart(fig, use_container_width=True, config=plotly_config)
 
-    # 4. ZUSATZDATEN (Support)
+    # 4. ZUSATZDATEN
     support_filename = f"support_{selected_single}.csv"
     if os.path.exists(support_filename):
         df_support = load_data(support_filename)
@@ -220,7 +226,7 @@ if current_topic == "Motor-Steckbriefe":
             fig_sup = lock_chart(add_watermark(fig_sup))
             st.plotly_chart(fig_sup, use_container_width=True, config=plotly_config)
 
-    # 5. MEDIEN (Ganz unten)
+    # 5. MEDIEN
     if meta_data_found:
         art, yt = gv("Link_Artikel"), gv("Link_Youtube")
         has_art = str(art).startswith("http")
@@ -323,12 +329,13 @@ else:
             df_res = pd.DataFrame(data_list)
             if not df_res.empty:
                 df_res = df_res.sort_values(by="Avg", ascending=True)
+                dynamic_height = 200 + (len(valid_motors) * 50)
+
                 fig_bar = go.Figure()
                 fig_bar.add_trace(go.Bar(y=df_res["Motor"], x=df_res["Avg"], orientation='h', name="Durchschnitt", marker_color=df_res["ColorAvg"], text=df_res["Avg"].round(1), textposition='auto'))
                 fig_bar.add_trace(go.Bar(y=df_res["Motor"], x=df_res["Min"], orientation='h', name="Minimum", marker_color=df_res["ColorMin"], text=df_res["Min"].round(1), textposition='auto'))
                 
                 fig_bar = lock_chart(fig_bar)
-                dynamic_height = 200 + (len(valid_motors) * 50)
                 fig_bar.update_layout(barmode='group', height=dynamic_height, xaxis_title=y_label, legend=dict(orientation="h", yanchor="bottom", y=1.02, xanchor="right", x=1), margin=dict(l=0, r=0, t=30, b=0))
                 st.plotly_chart(add_watermark(fig_bar, x=1, y=0, size=0.15, opacity=0.3, xanchor="right", yanchor="bottom"), use_container_width=True, config=plotly_config)
 
