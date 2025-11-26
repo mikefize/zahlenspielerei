@@ -1,48 +1,25 @@
-import os
 import streamlit as st
 import pandas as pd
 import plotly.express as px
-import plotly.graph_objects as go  # <--- NEU: Für volle Kontrolle über Balken
+import plotly.graph_objects as go
 import base64
 import re
 import matplotlib.colors as mc
 import colorsys
+import os
 
-# --- KONFIGURATION ---
+# --- KONFIGURATION & CLEAN LOOK ---
 st.set_page_config(page_title="E-Bike Motoren Prüfstand", layout="wide")
 
-# ... Imports ...
-# ... set_page_config ...
-
-# --- PASSWORT SCHUTZ ---
-def check_password():
-    """Gibt True zurück, wenn das Passwort korrekt ist."""
-    def password_entered():
-        if st.session_state["password"] == "ebike2024": # <--- HIER DEIN PASSWORT ÄNDERN
-            st.session_state["password_correct"] = True
-            del st.session_state["password"]  # Passwort nicht speichern
-        else:
-            st.session_state["password_correct"] = False
-
-    if "password_correct" not in st.session_state:
-        # Erste Ausführung: Eingabefeld zeigen
-        st.text_input(
-            "Bitte Passwort eingeben:", type="password", on_change=password_entered, key="password"
-        )
-        return False
-    elif not st.session_state["password_correct"]:
-        # Falsches Passwort
-        st.text_input(
-            "Bitte Passwort eingeben:", type="password", on_change=password_entered, key="password"
-        )
-        st.error("😕 Passwort falsch")
-        return False
-    else:
-        # Passwort korrekt
-        return True
-
-if not check_password():
-    st.stop() # Stoppt die App hier, wenn Passwort nicht okay
+# CSS Hack: Streamlit Header, Footer und Hamburger-Menü ausblenden
+hide_st_style = """
+            <style>
+            #MainMenu {visibility: hidden;}
+            footer {visibility: hidden;}
+            header {visibility: hidden;}
+            </style>
+            """
+st.markdown(hide_st_style, unsafe_allow_html=True)
 
 # --- HILFSFUNKTIONEN ---
 def clean_column_names(df):
@@ -50,7 +27,6 @@ def clean_column_names(df):
     return df
 
 def lighten_color(color, amount=0.5):
-    """Macht eine Farbe heller"""
     try: c = mc.cnames[color]
     except: c = color
     c = colorsys.rgb_to_hls(*mc.to_rgb(c))
@@ -86,6 +62,15 @@ def add_watermark(fig, x=0.5, y=0.5, size=0.6, opacity=0.15, xanchor="center", y
     except: pass
     return fig
 
+# Neue Funktion: Diagramm "einfrieren" (Kein Zoom, keine Toolbar)
+def lock_chart(fig):
+    fig.update_xaxes(fixedrange=True)
+    fig.update_yaxes(fixedrange=True)
+    return fig
+
+# Plotly Config: Toolbar ausblenden
+plotly_config = {'displayModeBar': False, 'staticPlot': False} # staticPlot=True würde auch Hover deaktivieren, das wollen wir nicht
+
 # --- DATEN LADEN ---
 df_leistung = load_data("leistung.csv", "Eingangsleistung")
 df_kadenz = load_data("kadenz.csv", "Kadenz")
@@ -94,7 +79,7 @@ df_therm_15 = load_data("15minuten.csv")
 df_therm_20 = load_data("20minuten.csv")
 
 if df_leistung is None:
-    st.error("Fehler: 'leistung.csv' fehlt.")
+    st.error("Datenbank nicht verfügbar.")
     st.stop()
 
 df_thermik = None
@@ -110,6 +95,9 @@ colors_palette = px.colors.qualitative.Dark24 + px.colors.qualitative.Light24
 motor_color_map = {motor: colors_palette[i % len(colors_palette)] for i, motor in enumerate(all_motors)}
 idx_250 = (df_leistung[df_leistung.columns[0]] - 250).abs().idxmin()
 ref_power_map = df_leistung.loc[idx_250].to_dict()
+
+# --- PASSWORT SCHUTZ (OPTIONAL, HIER DEAKTIVIERT ODER AKTIV LASSEN) ---
+# def check_password(): ... (Dein Code hier)
 
 if 'active_view' not in st.session_state: st.session_state.active_view = "Leistungskurven"
 if 'stored_selection' not in st.session_state: st.session_state.stored_selection = all_motors 
@@ -131,11 +119,16 @@ nav_button("Motor-Steckbriefe", "Motor-Steckbriefe")
 
 current_topic = st.session_state.active_view
 
+# ==============================================================================
+# MOTOR STECKBRIEFE
+# ==============================================================================
 if current_topic == "Motor-Steckbriefe":
     st.title("📝 Motor-Steckbrief")
     c_sel, _ = st.columns([1, 2])
     with c_sel: selected_single = st.selectbox("Motor wählen:", all_motors)
     st.markdown("---")
+    
+    # 1. Stammdaten
     if df_stammdaten is not None:
         meta = df_stammdaten[df_stammdaten["Modell"] == selected_single]
         if not meta.empty:
@@ -146,58 +139,64 @@ if current_topic == "Motor-Steckbriefe":
             with c3: st.metric("Max. Drehmoment", f"{gv('Max. Drehmoment (Nm)')} Nm")
             with c4: st.metric("Spannung", f"{gv('Systemspannung (V)')} V")
             if gv("Besonderheit") != "-": st.info(f"💡 {gv('Besonderheit')}")
-            art, yt = gv("Link_Artikel"), gv("Link_Youtube")
-            if (str(art).startswith("http")) or (str(yt).startswith("http")):
-                st.markdown("### 🎬 Testberichte")
-                m1, m2 = st.columns(2)
-                if str(yt).startswith("http"): m1.video(yt)
-                if str(art).startswith("http"): m2.link_button("📄 Zum Artikel", art)
-                st.markdown("---")
+
+    # 2. Diagramme
+    st.subheader("Messdaten")
     cL, cK = st.columns(2)
     with cL:
         if selected_single in df_leistung.columns:
             col = motor_color_map.get(selected_single, "blue")
-            fig = px.line(df_leistung, x=df_leistung.columns[0], y=selected_single, title="Leistung")
+            fig = px.line(df_leistung, x=df_leistung.columns[0], y=selected_single, title="Leistungskurve")
             fig.update_traces(fill='tozeroy', line_color=col)
-            st.plotly_chart(add_watermark(fig), use_container_width=True)
+            fig = lock_chart(add_watermark(fig)) # FIX: Lock Chart
+            st.plotly_chart(fig, use_container_width=True, config=plotly_config)
     with cK:
         if selected_single in df_kadenz.columns:
             col = motor_color_map.get(selected_single, "orange")
-            fig = px.line(df_kadenz, x=df_kadenz.columns[0], y=selected_single, title="Kadenz")
+            fig = px.line(df_kadenz, x=df_kadenz.columns[0], y=selected_single, title="Kadenzverlauf")
             fig.update_traces(fill='tozeroy', line_color=col)
-            st.plotly_chart(add_watermark(fig), use_container_width=True)
-    # --- DYNAMISCHE ZUSATZ-DATEN (Unterstützungsstufen) ---
-    # Dateiname konstruieren: "support_" + Motorname + ".csv"
-    # Achtung: Wir müssen sicherstellen, dass der Dateiname gültig ist 
-    # (keine verbotenen Zeichen, aber deine Motornamen sehen sauber aus)
+            fig = lock_chart(add_watermark(fig)) # FIX: Lock Chart
+            st.plotly_chart(fig, use_container_width=True, config=plotly_config)
+
+    # 3. Zusatz-Daten (Support)
     support_filename = f"support_{selected_single}.csv"
-    
     if os.path.exists(support_filename):
-        st.markdown("---")
-        st.subheader("⚡ Unterstützungsstufen im Detail")
-        
-        # Laden (wir nutzen unsere load_data Funktion, aber ohne Index-Filter)
-        # Annahme: Format ist ähnlich wie leistung.csv (X-Achse vorne, Stufen als Spalten)
         df_support = load_data(support_filename)
-        
         if df_support is not None and not df_support.empty:
-            # Erste Spalte ist X (z.B. Input Watt), der Rest sind die Stufen (Eco, Tour, Turbo...)
-            x_col_sup = df_support.columns[0]
-            modes = df_support.columns[1:]
+            st.subheader("Unterstützungsstufen")
+            fig_sup = px.line(df_support, x=df_support.columns[0], y=df_support.columns[1:])
+            fig_sup = lock_chart(add_watermark(fig_sup))
+            st.plotly_chart(fig_sup, use_container_width=True, config=plotly_config)
+
+    # 4. Medien (Video & Link) - JETZT GANZ UNTEN
+    if df_stammdaten is not None and not meta.empty:
+        art, yt = gv("Link_Artikel"), gv("Link_Youtube")
+        has_art = str(art).startswith("http")
+        has_yt = str(yt).startswith("http")
+        
+        if has_art or has_yt:
+            st.markdown("---")
+            st.subheader("Mehr erfahren")
             
-            fig_sup = px.line(
-                df_support, 
-                x=x_col_sup, 
-                y=modes,
-                labels={x_col_sup: "Eingangsleistung (Watt)", "value": "Ausgangsleistung (Watt)", "variable": "Modus"},
-                title=f"Leistungsentfaltung: {selected_single}"
-            )
-            fig_sup = add_watermark(fig_sup)
-            fig_sup.update_layout(hovermode="x unified", height=500)
-            st.plotly_chart(fig_sup, use_container_width=True)
+            # Layout: Video (klein) | Link (Button) | Leerraum
+            m1, m2, m3 = st.columns([1, 1, 2]) 
             
-            with st.expander("Datentabelle anzeigen"):
-                st.dataframe(df_support, use_container_width=True)
+            with m1:
+                if has_yt:
+                    st.markdown("**Video-Test:**")
+                    st.video(yt) # Nimmt automatisch die Breite der Spalte m1 an
+            
+            with m2:
+                if has_art:
+                    st.markdown("**Testbericht:**")
+                    st.write("Alle Details und Fazit im Artikel.")
+                    # Primary Button hebt sich optisch ab
+                    st.link_button("📄 Zum Testbericht", art, type="primary") 
+
+
+# ==============================================================================
+# VERGLEICHS-TOOL
+# ==============================================================================
 else:
     st.title(f"📊 Vergleich: {current_topic}")
     with st.container():
@@ -236,11 +235,16 @@ else:
     if not selected_motors: st.stop()
     valid_motors = [m for m in selected_motors if m in df_chart.columns]
     if valid_motors:
+        # HAUPTDIAGRAMM
         fig = px.line(df_chart, x=x_col, y=valid_motors, labels={x_col: x_label, "value": y_label, "variable": "Motor"}, color_discrete_map=motor_color_map)
         if current_topic == "Thermik": fig.update_xaxes(tickformat="%M:%S")
+        
         fig = add_watermark(fig, size=0.6, opacity=0.15)
+        fig = lock_chart(fig) # FIX: Chart sperren
         fig.update_layout(hovermode="x unified", height=600, legend=dict(orientation="h", yanchor="bottom", y=1.02, xanchor="right", x=1))
-        st.plotly_chart(fig, use_container_width=True)
+        
+        st.plotly_chart(fig, use_container_width=True, config=plotly_config) # FIX: Toolbar weg
+        
         csv = df_chart[[x_col] + valid_motors].to_csv(index=False, sep=";", decimal=",").encode('utf-8')
         st.download_button("💾 CSV Export", csv, "export.csv", "text/csv")
         
@@ -257,68 +261,31 @@ else:
                 fig_bar = px.bar(bar_data, x="Wert", y="Motor", color="Motor", orientation='h', text_auto='.1f', color_discrete_map=motor_color_map)
                 fig_bar.update_yaxes(categoryorder='total ascending')
                 dynamic_height = max(400, len(valid_motors) * 40)
+                fig_bar = lock_chart(fig_bar) # FIX: Chart sperren
                 fig_bar.update_layout(height=dynamic_height, showlegend=False)
-                st.plotly_chart(add_watermark(fig_bar, x=1, y=0, size=0.15, opacity=0.3, xanchor="right", yanchor="bottom"), use_container_width=True)
+                st.plotly_chart(add_watermark(fig_bar, x=1, y=0, size=0.15, opacity=0.3, xanchor="right", yanchor="bottom"), use_container_width=True, config=plotly_config)
         else:
-            # --- THERMIK SPEZIAL (MANUELL MIT GRAPH OBJECTS) ---
             st.markdown("### 📉 Durchschnitt & Minimum (erste 15 Min)")
             start_t = df_chart[x_col].min()
             end_t = start_t + pd.Timedelta(minutes=15)
             df_15 = df_chart[(df_chart[x_col] >= start_t) & (df_chart[x_col] <= end_t)]
             
-            # 1. Daten berechnen & sammeln
             data_list = []
             for m in valid_motors:
-                avg_val = df_15[m].mean()
-                min_val = df_15[m].min()
                 base_c = motor_color_map.get(m, "#000000")
                 light_c = lighten_color(base_c, 0.5)
-                data_list.append({
-                    "Motor": m, "Avg": avg_val, "Min": min_val,
-                    "ColorAvg": base_c, "ColorMin": light_c
-                })
+                data_list.append({"Motor": m, "Avg": df_15[m].mean(), "Min": df_15[m].min(), "ColorAvg": base_c, "ColorMin": light_c})
             
             df_res = pd.DataFrame(data_list)
-            
             if not df_res.empty:
-                # 2. Sortieren: Bester Durchschnitt oben
                 df_res = df_res.sort_values(by="Avg", ascending=True)
-                
-                # 3. Manuell Plotly Graph Objects bauen (für volle Kontrolle)
                 fig_bar = go.Figure()
+                fig_bar.add_trace(go.Bar(y=df_res["Motor"], x=df_res["Avg"], name="Durchschnitt", orientation='h', marker_color=df_res["ColorAvg"], text=df_res["Avg"].round(1), textposition='auto'))
+                fig_bar.add_trace(go.Bar(y=df_res["Motor"], x=df_res["Min"], name="Minimum", orientation='h', marker_color=df_res["ColorMin"], text=df_res["Min"].round(1), textposition='auto'))
                 
-                # Spur 1: Durchschnitt (Dunkle Farbe)
-                fig_bar.add_trace(go.Bar(
-                    y=df_res["Motor"],
-                    x=df_res["Avg"],
-                    name="Durchschnitt",
-                    orientation='h',
-                    marker_color=df_res["ColorAvg"],
-                    text=df_res["Avg"].round(1),
-                    textposition='auto'
-                ))
-                
-                # Spur 2: Minimum (Helle Farbe)
-                fig_bar.add_trace(go.Bar(
-                    y=df_res["Motor"],
-                    x=df_res["Min"],
-                    name="Minimum",
-                    orientation='h',
-                    marker_color=df_res["ColorMin"],
-                    text=df_res["Min"].round(1),
-                    textposition='auto'
-                ))
-
-                # Layout aufhübschen
+                fig_bar = lock_chart(fig_bar) # FIX: Chart sperren
                 dynamic_height = 200 + (len(valid_motors) * 50)
-                fig_bar.update_layout(
-                    barmode='group', # Wichtig: Nebeneinander
-                    height=dynamic_height,
-                    xaxis_title=y_label,
-                    legend=dict(orientation="h", yanchor="bottom", y=1.02, xanchor="right", x=1),
-                    margin=dict(l=0, r=0, t=30, b=0)
-                )
-                
-                st.plotly_chart(add_watermark(fig_bar, x=1, y=0, size=0.15, opacity=0.3, xanchor="right", yanchor="bottom"), use_container_width=True)
+                fig_bar.update_layout(barmode='group', height=dynamic_height, xaxis_title=y_label, legend=dict(orientation="h", yanchor="bottom", y=1.02, xanchor="right", x=1), margin=dict(l=0, r=0, t=30, b=0))
+                st.plotly_chart(add_watermark(fig_bar, x=1, y=0, size=0.15, opacity=0.3, xanchor="right", yanchor="bottom"), use_container_width=True, config=plotly_config)
 
     else: st.info("Keine Daten.")
