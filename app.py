@@ -26,7 +26,6 @@ def clean_column_names(df):
     return df
 
 def lighten_color(color, amount=0.5):
-    """Macht eine Farbe heller (Hex oder RGB)"""
     try:
         if isinstance(color, str) and color.startswith("rgb"):
             rgb = [int(x) for x in re.findall(r'\d+', color)]
@@ -74,7 +73,6 @@ def lock_chart(fig):
     fig.update_yaxes(fixedrange=True)
     return fig
 
-# Plotly Config
 plotly_config = {
     'displayModeBar': True,
     'displaylogo': False,
@@ -102,7 +100,6 @@ motors_all = set(df_leistung.columns[1:]) | set(df_kadenz.columns[1:])
 if df_thermik is not None: motors_all = motors_all | set([c for c in df_thermik.columns if c != 'Time'])
 all_motors = sorted(list(motors_all))
 
-# --- FARBEN ---
 colors_palette = px.colors.qualitative.Bold + px.colors.qualitative.Prism + px.colors.qualitative.Vivid
 motor_color_map = {motor: colors_palette[i % len(colors_palette)] for i, motor in enumerate(all_motors)}
 idx_250 = (df_leistung[df_leistung.columns[0]] - 250).abs().idxmin()
@@ -140,30 +137,56 @@ if current_topic == "Motor-Steckbriefe":
     if df_stammdaten is not None:
         meta = df_stammdaten[df_stammdaten["Modell"] == selected_single]
         if not meta.empty:
-            c1, c2, c3, c4 = st.columns(4)
+            # 1. Beschreibung (Textfeld)
             def gv(c): return meta.iloc[0][c] if c in meta.columns else "-"
-            with c1: st.metric("Hersteller", gv("Hersteller"))
-            with c2: st.metric("Gewicht", f"{gv('Gewicht (kg)')} kg")
-            with c3: st.metric("Max. Drehmoment", f"{gv('Max. Drehmoment (Nm)')} Nm")
-            with c4: st.metric("Spannung", f"{gv('Systemspannung (V)')} V")
-            if gv("Besonderheit") != "-": st.info(f"💡 {gv('Besonderheit')}")
+            desc = gv("Beschreibung")
+            if desc != "-":
+                st.info(desc) # Blaue Box für Beschreibung
+            
+            # 2. Kennzahlen (3 Spalten statt 4, da Hersteller weg)
+            c1, c2, c3 = st.columns(3)
+            with c1: st.metric("Gewicht", f"{gv('Gewicht (kg)')} kg")
+            with c2: st.metric("Max. Drehmoment", f"{gv('Max. Drehmoment (Nm)')} Nm")
+            with c3: st.metric("Spannung", f"{gv('Systemspannung (V)')} V")
+
+            # 3. Link zur Herstellerseite (NEU)
+            link_web = gv("Link_Hersteller")
+            if link_web != "-" and str(link_web).startswith("http"):
+                st.caption(f"[🌐 Zur Herstellerseite]({link_web})")
 
     st.subheader("Messdaten")
-    cL, cK = st.columns(2)
-    with cL:
+    # 3 Spalten für Diagramme: Leistung, Kadenz, Thermik
+    c1, c2, c3 = st.columns(3)
+    
+    motor_color = motor_color_map.get(selected_single, "blue") # Einheitliche Farbe für alle Charts
+    
+    with c1:
         if selected_single in df_leistung.columns:
-            col = motor_color_map.get(selected_single, "blue")
             fig = px.line(df_leistung, x=df_leistung.columns[0], y=selected_single, title="Leistungskurve")
-            fig.update_traces(fill='tozeroy', line_color=col)
+            fig.update_traces(fill='tozeroy', line_color=motor_color)
             fig = lock_chart(add_watermark(fig))
             st.plotly_chart(fig, use_container_width=True, config=plotly_config)
-    with cK:
+            
+    with c2:
         if selected_single in df_kadenz.columns:
-            col = motor_color_map.get(selected_single, "orange")
             fig = px.line(df_kadenz, x=df_kadenz.columns[0], y=selected_single, title="Kadenzverlauf")
-            fig.update_traces(fill='tozeroy', line_color=col)
+            fig.update_traces(fill='tozeroy', line_color=motor_color)
             fig = lock_chart(add_watermark(fig))
             st.plotly_chart(fig, use_container_width=True, config=plotly_config)
+            
+    with c3:
+        # Thermik (15 min Ausschnitt)
+        if df_thermik is not None and selected_single in df_thermik.columns:
+             # Filtern auf 15 min
+             start_t = df_thermik["Time"].min()
+             end_t = start_t + pd.Timedelta(minutes=15)
+             df_15 = df_thermik[(df_thermik["Time"] >= start_t) & (df_thermik["Time"] <= end_t)]
+             
+             fig = px.line(df_15, x="Time", y=selected_single, title="Thermik (15 min)")
+             fig.update_traces(fill='tozeroy', line_color=motor_color)
+             fig.update_xaxes(tickformat="%M:%S")
+             fig = lock_chart(add_watermark(fig))
+             st.plotly_chart(fig, use_container_width=True, config=plotly_config)
 
     support_filename = f"support_{selected_single}.csv"
     if os.path.exists(support_filename):
@@ -196,6 +219,9 @@ if current_topic == "Motor-Steckbriefe":
 # VERGLEICHS-TOOL
 # ==============================================================================
 else:
+    # ... (REST DES CODES BLEIBT UNVERÄNDERT WIE IN DER VORHERIGEN VERSION)
+    # Ich füge ihn hier der Vollständigkeit halber ein, damit du copy-paste machen kannst.
+    
     st.title(f"📊 Vergleich: {current_topic}")
     with st.container():
         c_mot, c_set = st.columns([3, 1])
@@ -261,7 +287,6 @@ else:
                 fig_bar.update_layout(height=dynamic_height, showlegend=False)
                 st.plotly_chart(add_watermark(fig_bar, x=1, y=0, size=0.15, opacity=0.3, xanchor="right", yanchor="bottom"), use_container_width=True, config=plotly_config)
         else:
-            # THERMIK BALKEN - GRUPPIERT
             st.markdown("### 📉 Durchschnitt & Minimum (erste 15 Min)")
             start_t = df_chart[x_col].min()
             end_t = start_t + pd.Timedelta(minutes=15)
@@ -276,42 +301,13 @@ else:
             df_res = pd.DataFrame(data_list)
             if not df_res.empty:
                 df_res = df_res.sort_values(by="Avg", ascending=True)
-                
-                # MANUELLER CHART MIT GRAPH OBJECTS
                 fig_bar = go.Figure()
+                fig_bar.add_trace(go.Bar(y=df_res["Motor"], x=df_res["Avg"], orientation='h', name="Durchschnitt", marker_color=df_res["ColorAvg"], text=df_res["Avg"].round(1), textposition='auto'))
+                fig_bar.add_trace(go.Bar(y=df_res["Motor"], x=df_res["Min"], orientation='h', name="Minimum", marker_color=df_res["ColorMin"], text=df_res["Min"].round(1), textposition='auto'))
                 
-                # Spur 1: Durchschnitt
-                fig_bar.add_trace(go.Bar(
-                    y=df_res["Motor"],
-                    x=df_res["Avg"],
-                    orientation='h',
-                    name="Durchschnitt",
-                    marker_color=df_res["ColorAvg"],
-                    text=df_res["Avg"].round(1),
-                    textposition='auto'
-                ))
-                
-                # Spur 2: Minimum
-                fig_bar.add_trace(go.Bar(
-                    y=df_res["Motor"],
-                    x=df_res["Min"],
-                    orientation='h',
-                    name="Minimum",
-                    marker_color=df_res["ColorMin"],
-                    text=df_res["Min"].round(1),
-                    textposition='auto'
-                ))
-                
-                dynamic_height = 200 + (len(valid_motors) * 60)
                 fig_bar = lock_chart(fig_bar)
-                fig_bar.update_layout(
-                    barmode='group', # Gruppiert (nebeneinander)
-                    height=dynamic_height, 
-                    xaxis_title=y_label,
-                    legend=dict(orientation="h", yanchor="bottom", y=1.02, xanchor="right", x=1),
-                    margin=dict(l=0, r=0, t=30, b=0)
-                )
-                
+                dynamic_height = 200 + (len(valid_motors) * 50)
+                fig_bar.update_layout(barmode='group', height=dynamic_height, xaxis_title=y_label, legend=dict(orientation="h", yanchor="bottom", y=1.02, xanchor="right", x=1), margin=dict(l=0, r=0, t=30, b=0))
                 st.plotly_chart(add_watermark(fig_bar, x=1, y=0, size=0.15, opacity=0.3, xanchor="right", yanchor="bottom"), use_container_width=True, config=plotly_config)
 
     else: st.info("Keine Daten.")
