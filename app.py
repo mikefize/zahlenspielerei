@@ -42,20 +42,30 @@ def lighten_color(color, amount=0.5):
 @st.cache_data
 def load_data(filename, index_col_name=None, sep=";", decimal=","):
     try:
-        df = pd.read_csv(filename, sep=sep, decimal=decimal)
+        # engine='python' ist robuster bei CSVs mit viel Text (Beschreibung)
+        df = pd.read_csv(filename, sep=sep, decimal=decimal, engine='python')
         df = clean_column_names(df)
+        
         if "15minuten" in filename or "20minuten" in filename:
             df.rename(columns={df.columns[0]: 'Time'}, inplace=True)
             df['Time'] = pd.to_datetime(df['Time'], format='%H:%M:%S', errors='coerce')
             df = df.dropna(subset=['Time'])
             return df
+
         if index_col_name:
             clean_idx = re.sub(' +', ' ', index_col_name.strip())
             if clean_idx in df.columns:
                 df = df.dropna(subset=[clean_idx])
             else:
+                # Fallback: Erste Spalte nehmen
                 df = df.dropna(subset=[df.columns[0]])
-        if index_col_name != "Modell": df = df.apply(pd.to_numeric, errors='coerce')
+        
+        if index_col_name != "Modell": 
+            # Versuche alles in Zahlen zu wandeln, außer Modell-Spalte
+            # ignore errors, damit Text in Beschreibung nicht zu NaN wird
+            cols = df.columns.drop(index_col_name) if index_col_name in df.columns else df.columns[1:]
+            df[cols] = df[cols].apply(pd.to_numeric, errors='coerce')
+            
         return df
     except FileNotFoundError:
         return None
@@ -102,8 +112,13 @@ all_motors = sorted(list(motors_all))
 
 colors_palette = px.colors.qualitative.Bold + px.colors.qualitative.Prism + px.colors.qualitative.Vivid
 motor_color_map = {motor: colors_palette[i % len(colors_palette)] for i, motor in enumerate(all_motors)}
-idx_250 = (df_leistung[df_leistung.columns[0]] - 250).abs().idxmin()
-ref_power_map = df_leistung.loc[idx_250].to_dict()
+
+# Indexierung robuster machen
+try:
+    idx_250 = (df_leistung[df_leistung.columns[0]] - 250).abs().idxmin()
+    ref_power_map = df_leistung.loc[idx_250].to_dict()
+except:
+    ref_power_map = {}
 
 if 'active_view' not in st.session_state: st.session_state.active_view = "Leistungskurven"
 if 'stored_selection' not in st.session_state: st.session_state.stored_selection = all_motors 
@@ -134,50 +149,57 @@ if current_topic == "Motor-Steckbriefe":
     with c_sel: selected_single = st.selectbox("Motor wählen:", all_motors)
     st.markdown("---")
     
+    meta_data_found = False
+    
     if df_stammdaten is not None:
         meta = df_stammdaten[df_stammdaten["Modell"] == selected_single]
         if not meta.empty:
-            # 1. Beschreibung (Textfeld)
+            meta_data_found = True
             def gv(c): return meta.iloc[0][c] if c in meta.columns else "-"
-            desc = gv("Beschreibung")
-            if desc != "-":
-                st.info(desc) # Blaue Box für Beschreibung
-            
-            # 2. Kennzahlen (3 Spalten statt 4, da Hersteller weg)
-            c1, c2, c3 = st.columns(3)
-            with c1: st.metric("Gewicht", f"{gv('Gewicht (kg)')} kg")
-            with c2: st.metric("Max. Drehmoment", f"{gv('Max. Drehmoment (Nm)')} Nm")
-            with c3: st.metric("Spannung", f"{gv('Systemspannung (V)')} V")
 
-            # 3. Link zur Herstellerseite (NEU)
+            # 1. BESCHREIBUNG (Ganz oben, prominent)
+            desc = gv("Beschreibung")
+            if desc != "-" and pd.notna(desc):
+                st.info(desc) # Blaue Box
+            
+            # 2. KENNZAHLEN
+            c1, c2, c3 = st.columns(3)
+            # Hersteller aus Namen raten, falls nicht in CSV
+            hersteller = selected_single.split(" ")[0] 
+            
+            with c1: st.metric("Hersteller", hersteller)
+            with c2: st.metric("Gewicht", f"{gv('Gewicht (kg)')} kg")
+            with c3: st.metric("Max. Drehmoment", f"{gv('Max. Drehmoment (Nm)')} Nm")
+
+            # Link zur Herstellerseite
             link_web = gv("Link_Hersteller")
             if link_web != "-" and str(link_web).startswith("http"):
                 st.caption(f"[🌐 Zur Herstellerseite]({link_web})")
+            
+            st.markdown("---")
 
+    # 3. DIAGRAMME
     st.subheader("Messdaten")
-    # 3 Spalten für Diagramme: Leistung, Kadenz, Thermik
-    c1, c2, c3 = st.columns(3)
+    cL, cK, cT = st.columns(3) # Jetzt 3 Spalten für Thermik
+    motor_color = motor_color_map.get(selected_single, "blue")
     
-    motor_color = motor_color_map.get(selected_single, "blue") # Einheitliche Farbe für alle Charts
-    
-    with c1:
+    with cL:
         if selected_single in df_leistung.columns:
             fig = px.line(df_leistung, x=df_leistung.columns[0], y=selected_single, title="Leistungskurve")
             fig.update_traces(fill='tozeroy', line_color=motor_color)
             fig = lock_chart(add_watermark(fig))
             st.plotly_chart(fig, use_container_width=True, config=plotly_config)
             
-    with c2:
+    with cK:
         if selected_single in df_kadenz.columns:
             fig = px.line(df_kadenz, x=df_kadenz.columns[0], y=selected_single, title="Kadenzverlauf")
             fig.update_traces(fill='tozeroy', line_color=motor_color)
             fig = lock_chart(add_watermark(fig))
             st.plotly_chart(fig, use_container_width=True, config=plotly_config)
             
-    with c3:
+    with cT:
         # Thermik (15 min Ausschnitt)
         if df_thermik is not None and selected_single in df_thermik.columns:
-             # Filtern auf 15 min
              start_t = df_thermik["Time"].min()
              end_t = start_t + pd.Timedelta(minutes=15)
              df_15 = df_thermik[(df_thermik["Time"] >= start_t) & (df_thermik["Time"] <= end_t)]
@@ -188,6 +210,7 @@ if current_topic == "Motor-Steckbriefe":
              fig = lock_chart(add_watermark(fig))
              st.plotly_chart(fig, use_container_width=True, config=plotly_config)
 
+    # 4. ZUSATZDATEN (Support)
     support_filename = f"support_{selected_single}.csv"
     if os.path.exists(support_filename):
         df_support = load_data(support_filename)
@@ -197,10 +220,12 @@ if current_topic == "Motor-Steckbriefe":
             fig_sup = lock_chart(add_watermark(fig_sup))
             st.plotly_chart(fig_sup, use_container_width=True, config=plotly_config)
 
-    if df_stammdaten is not None and not meta.empty:
+    # 5. MEDIEN (Ganz unten)
+    if meta_data_found:
         art, yt = gv("Link_Artikel"), gv("Link_Youtube")
         has_art = str(art).startswith("http")
         has_yt = str(yt).startswith("http")
+        
         if has_art or has_yt:
             st.markdown("---")
             st.subheader("Mehr erfahren")
@@ -219,9 +244,6 @@ if current_topic == "Motor-Steckbriefe":
 # VERGLEICHS-TOOL
 # ==============================================================================
 else:
-    # ... (REST DES CODES BLEIBT UNVERÄNDERT WIE IN DER VORHERIGEN VERSION)
-    # Ich füge ihn hier der Vollständigkeit halber ein, damit du copy-paste machen kannst.
-    
     st.title(f"📊 Vergleich: {current_topic}")
     with st.container():
         c_mot, c_set = st.columns([3, 1])
