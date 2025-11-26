@@ -26,11 +26,30 @@ def clean_column_names(df):
     return df
 
 def lighten_color(color, amount=0.5):
-    try: c = mc.cnames[color]
-    except: c = color
-    c = colorsys.rgb_to_hls(*mc.to_rgb(c))
-    new_lightness = max(0, min(1, amount * c[1] + (1 - amount)))
-    return mc.to_hex(colorsys.hls_to_rgb(c[0], new_lightness, c[2]))
+    """
+    Macht eine Farbe heller.
+    Versteht Hex (#RRGGBB) und Plotly RGB Strings (rgb(r, g, b)).
+    """
+    try:
+        # 1. Versuch: Ist es ein Plotly RGB String? "rgb(255, 0, 12)"
+        if isinstance(color, str) and color.startswith("rgb"):
+            # Zahlen extrahieren
+            rgb = [int(x) for x in re.findall(r'\d+', color)]
+            # Auf 0-1 Skalieren für colorsys
+            c_rgb = (rgb[0]/255.0, rgb[1]/255.0, rgb[2]/255.0)
+        else:
+            # 2. Versuch: Ist es Hex oder Name? Matplotlib fragen
+            c_rgb = mc.to_rgb(color)
+            
+        # Umrechnung
+        c_hls = colorsys.rgb_to_hls(*c_rgb)
+        new_lightness = max(0, min(1, amount * c_hls[1] + (1 - amount)))
+        new_rgb = colorsys.hls_to_rgb(c_hls[0], new_lightness, c_hls[2])
+        return mc.to_hex(new_rgb)
+        
+    except Exception:
+        # Fallback, falls irgendwas exotisches kommt: Einfach Grau zurückgeben
+        return "#CCCCCC"
 
 @st.cache_data
 def load_data(filename, index_col_name=None, sep=";", decimal=","):
@@ -66,7 +85,7 @@ def lock_chart(fig):
     fig.update_yaxes(fixedrange=True)
     return fig
 
-# Plotly Config: Toolbar angepasst (Download da, Zoom weg)
+# Plotly Config
 plotly_config = {
     'displayModeBar': True,
     'displaylogo': False,
@@ -94,8 +113,7 @@ motors_all = set(df_leistung.columns[1:]) | set(df_kadenz.columns[1:])
 if df_thermik is not None: motors_all = motors_all | set([c for c in df_thermik.columns if c != 'Time'])
 all_motors = sorted(list(motors_all))
 
-# --- NEUE FARBPALETTE (KEINE GRAUTÖNE MEHR) ---
-# Wir mischen drei kräftige Paletten, um genug Farben für >20 Motoren zu haben
+# --- NEUE FARBPALETTE ---
 colors_palette = px.colors.qualitative.Bold + px.colors.qualitative.Prism + px.colors.qualitative.Vivid
 motor_color_map = {motor: colors_palette[i % len(colors_palette)] for i, motor in enumerate(all_motors)}
 
@@ -172,6 +190,7 @@ if current_topic == "Motor-Steckbriefe":
         art, yt = gv("Link_Artikel"), gv("Link_Youtube")
         has_art = str(art).startswith("http")
         has_yt = str(yt).startswith("http")
+        
         if has_art or has_yt:
             st.markdown("---")
             st.subheader("Mehr erfahren")
@@ -184,7 +203,7 @@ if current_topic == "Motor-Steckbriefe":
                 if has_art:
                     st.markdown("**Testbericht:**")
                     st.write("Alle Details und Fazit im Artikel.")
-                    st.link_button("📄 Zum Testbericht", art, type="primary") 
+                    st.link_button("📄 Zum Artikel", art, type="primary") 
 
 # ==============================================================================
 # VERGLEICHS-TOOL
@@ -269,29 +288,20 @@ else:
             df_res = pd.DataFrame(data_list)
             if not df_res.empty:
                 df_res = df_res.sort_values(by="Avg", ascending=True)
-                
-                # DYNAMISCHE HÖHE
-                dynamic_height = 200 + (len(valid_motors) * 50)
+                dynamic_height = 200 + (len(valid_motors) * 60)
 
                 col_avg, col_min = st.columns(2)
                 with col_avg:
                     st.markdown("**Durchschnitt**")
-                    fig_a = go.Figure(go.Bar(
-                        y=df_res["Motor"], x=df_res["Avg"], orientation='h',
-                        marker_color=df_res["ColorAvg"], text=df_res["Avg"].round(1), textposition='auto'
-                    ))
+                    fig_a = go.Figure(go.Bar(y=df_res["Motor"], x=df_res["Avg"], orientation='h', marker_color=df_res["ColorAvg"], text=df_res["Avg"].round(1), textposition='auto'))
                     fig_a = lock_chart(fig_a)
                     fig_a.update_layout(height=dynamic_height, yaxis={'categoryorder':'total ascending'}, margin=dict(l=0, r=0, t=10, b=0))
                     st.plotly_chart(add_watermark(fig_a, x=1, y=0, size=0.15, opacity=0.3, xanchor="right", yanchor="bottom"), use_container_width=True, config=plotly_config)
                 
                 with col_min:
                     st.markdown("**Minimum (Tiefpunkt)**")
-                    fig_m = go.Figure(go.Bar(
-                        y=df_res["Motor"], x=df_res["Min"], orientation='h',
-                        marker_color=df_res["ColorMin"], text=df_res["Min"].round(1), textposition='auto'
-                    ))
+                    fig_m = go.Figure(go.Bar(y=df_res["Motor"], x=df_res["Min"], orientation='h', marker_color=df_res["ColorMin"], text=df_res["Min"].round(1), textposition='auto'))
                     fig_m = lock_chart(fig_m)
-                    # Gleiche Sortierung wie Avg erzwingen
                     fig_m.update_yaxes(categoryorder='array', categoryarray=df_res["Motor"].tolist())
                     fig_m.update_layout(height=dynamic_height, yaxis_showticklabels=False, margin=dict(l=0, r=0, t=10, b=0))
                     st.plotly_chart(add_watermark(fig_m, x=1, y=0, size=0.15, opacity=0.3, xanchor="right", yanchor="bottom"), use_container_width=True, config=plotly_config)
