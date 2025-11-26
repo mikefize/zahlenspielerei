@@ -62,27 +62,16 @@ def add_watermark(fig, x=0.5, y=0.5, size=0.6, opacity=0.15, xanchor="center", y
     return fig
 
 def lock_chart(fig):
-    # Fixiert die Achsen (verhindert Zoom/Pan per Maus-Drag)
     fig.update_xaxes(fixedrange=True)
     fig.update_yaxes(fixedrange=True)
     return fig
 
-# --- NEUE PLOTLY CONFIG ---
-# Wir konfigurieren die Toolbar exakt nach Wunsch
+# Plotly Config: Toolbar angepasst (Download da, Zoom weg)
 plotly_config = {
-    'displayModeBar': True,       # Toolbar anzeigen (aber nur bei Hover)
-    'displaylogo': False,         # Plotly Logo entfernen
-    'modeBarButtonsToRemove': [   # Alle diese Buttons entfernen wir:
-        'zoom2d', 'pan2d', 'select2d', 'lasso2d', 'zoomIn2d', 'zoomOut2d', 
-        'autoScale2d', 'resetScale2d', 'hoverClosestCartesian', 'hoverCompareCartesian'
-    ],
-    'toImageButtonOptions': {     # Einstellungen für den Download-Button
-        'format': 'png',          # Format
-        'filename': 'ebike_chart',
-        'height': 800,
-        'width': 1200,
-        'scale': 2                # Hohe Auflösung (Retina)
-    }
+    'displayModeBar': True,
+    'displaylogo': False,
+    'modeBarButtonsToRemove': ['zoom2d', 'pan2d', 'select2d', 'lasso2d', 'zoomIn2d', 'zoomOut2d', 'autoScale2d', 'resetScale2d', 'hoverClosestCartesian', 'hoverCompareCartesian'],
+    'toImageButtonOptions': {'format': 'png', 'filename': 'ebike_chart', 'height': 800, 'width': 1200, 'scale': 2}
 }
 
 # --- DATEN LADEN ---
@@ -105,8 +94,11 @@ motors_all = set(df_leistung.columns[1:]) | set(df_kadenz.columns[1:])
 if df_thermik is not None: motors_all = motors_all | set([c for c in df_thermik.columns if c != 'Time'])
 all_motors = sorted(list(motors_all))
 
-colors_palette = px.colors.qualitative.Dark24 + px.colors.qualitative.Light24
+# --- NEUE FARBPALETTE (KEINE GRAUTÖNE MEHR) ---
+# Wir mischen drei kräftige Paletten, um genug Farben für >20 Motoren zu haben
+colors_palette = px.colors.qualitative.Bold + px.colors.qualitative.Prism + px.colors.qualitative.Vivid
 motor_color_map = {motor: colors_palette[i % len(colors_palette)] for i, motor in enumerate(all_motors)}
+
 idx_250 = (df_leistung[df_leistung.columns[0]] - 250).abs().idxmin()
 ref_power_map = df_leistung.loc[idx_250].to_dict()
 
@@ -150,7 +142,6 @@ if current_topic == "Motor-Steckbriefe":
             with c4: st.metric("Spannung", f"{gv('Systemspannung (V)')} V")
             if gv("Besonderheit") != "-": st.info(f"💡 {gv('Besonderheit')}")
 
-    # Diagramme
     st.subheader("Messdaten")
     cL, cK = st.columns(2)
     with cL:
@@ -177,12 +168,10 @@ if current_topic == "Motor-Steckbriefe":
             fig_sup = lock_chart(add_watermark(fig_sup))
             st.plotly_chart(fig_sup, use_container_width=True, config=plotly_config)
 
-    # Medien unten
     if df_stammdaten is not None and not meta.empty:
         art, yt = gv("Link_Artikel"), gv("Link_Youtube")
         has_art = str(art).startswith("http")
         has_yt = str(yt).startswith("http")
-        
         if has_art or has_yt:
             st.markdown("---")
             st.subheader("Mehr erfahren")
@@ -238,15 +227,12 @@ else:
     if not selected_motors: st.stop()
     valid_motors = [m for m in selected_motors if m in df_chart.columns]
     if valid_motors:
-        # Hauptdiagramm
         fig = px.line(df_chart, x=x_col, y=valid_motors, labels={x_col: x_label, "value": y_label, "variable": "Motor"}, color_discrete_map=motor_color_map)
         if current_topic == "Thermik": fig.update_xaxes(tickformat="%M:%S")
         
         fig = add_watermark(fig, size=0.6, opacity=0.15)
         fig = lock_chart(fig) 
         fig.update_layout(hovermode="x unified", height=600, legend=dict(orientation="h", yanchor="bottom", y=1.02, xanchor="right", x=1))
-        
-        # HIER IST DIE CONFIG WICHTIG:
         st.plotly_chart(fig, use_container_width=True, config=plotly_config)
         
         csv = df_chart[[x_col] + valid_motors].to_csv(index=False, sep=";", decimal=",").encode('utf-8')
@@ -283,13 +269,31 @@ else:
             df_res = pd.DataFrame(data_list)
             if not df_res.empty:
                 df_res = df_res.sort_values(by="Avg", ascending=True)
-                fig_bar = go.Figure()
-                fig_bar.add_trace(go.Bar(y=df_res["Motor"], x=df_res["Avg"], name="Durchschnitt", orientation='h', marker_color=df_res["ColorAvg"], text=df_res["Avg"].round(1), textposition='auto'))
-                fig_bar.add_trace(go.Bar(y=df_res["Motor"], x=df_res["Min"], name="Minimum", orientation='h', marker_color=df_res["ColorMin"], text=df_res["Min"].round(1), textposition='auto'))
                 
-                fig_bar = lock_chart(fig_bar)
+                # DYNAMISCHE HÖHE
                 dynamic_height = 200 + (len(valid_motors) * 50)
-                fig_bar.update_layout(barmode='group', height=dynamic_height, xaxis_title=y_label, legend=dict(orientation="h", yanchor="bottom", y=1.02, xanchor="right", x=1), margin=dict(l=0, r=0, t=30, b=0))
-                st.plotly_chart(add_watermark(fig_bar, x=1, y=0, size=0.15, opacity=0.3, xanchor="right", yanchor="bottom"), use_container_width=True, config=plotly_config)
+
+                col_avg, col_min = st.columns(2)
+                with col_avg:
+                    st.markdown("**Durchschnitt**")
+                    fig_a = go.Figure(go.Bar(
+                        y=df_res["Motor"], x=df_res["Avg"], orientation='h',
+                        marker_color=df_res["ColorAvg"], text=df_res["Avg"].round(1), textposition='auto'
+                    ))
+                    fig_a = lock_chart(fig_a)
+                    fig_a.update_layout(height=dynamic_height, yaxis={'categoryorder':'total ascending'}, margin=dict(l=0, r=0, t=10, b=0))
+                    st.plotly_chart(add_watermark(fig_a, x=1, y=0, size=0.15, opacity=0.3, xanchor="right", yanchor="bottom"), use_container_width=True, config=plotly_config)
+                
+                with col_min:
+                    st.markdown("**Minimum (Tiefpunkt)**")
+                    fig_m = go.Figure(go.Bar(
+                        y=df_res["Motor"], x=df_res["Min"], orientation='h',
+                        marker_color=df_res["ColorMin"], text=df_res["Min"].round(1), textposition='auto'
+                    ))
+                    fig_m = lock_chart(fig_m)
+                    # Gleiche Sortierung wie Avg erzwingen
+                    fig_m.update_yaxes(categoryorder='array', categoryarray=df_res["Motor"].tolist())
+                    fig_m.update_layout(height=dynamic_height, yaxis_showticklabels=False, margin=dict(l=0, r=0, t=10, b=0))
+                    st.plotly_chart(add_watermark(fig_m, x=1, y=0, size=0.15, opacity=0.3, xanchor="right", yanchor="bottom"), use_container_width=True, config=plotly_config)
 
     else: st.info("Keine Daten.")
