@@ -11,6 +11,39 @@ import colorsys
 # --- KONFIGURATION ---
 st.set_page_config(page_title="E-Bike Motoren Prüfstand", layout="wide")
 
+# ... Imports ...
+# ... set_page_config ...
+
+# --- PASSWORT SCHUTZ ---
+def check_password():
+    """Gibt True zurück, wenn das Passwort korrekt ist."""
+    def password_entered():
+        if st.session_state["password"] == "ebike2024": # <--- HIER DEIN PASSWORT ÄNDERN
+            st.session_state["password_correct"] = True
+            del st.session_state["password"]  # Passwort nicht speichern
+        else:
+            st.session_state["password_correct"] = False
+
+    if "password_correct" not in st.session_state:
+        # Erste Ausführung: Eingabefeld zeigen
+        st.text_input(
+            "Bitte Passwort eingeben:", type="password", on_change=password_entered, key="password"
+        )
+        return False
+    elif not st.session_state["password_correct"]:
+        # Falsches Passwort
+        st.text_input(
+            "Bitte Passwort eingeben:", type="password", on_change=password_entered, key="password"
+        )
+        st.error("😕 Passwort falsch")
+        return False
+    else:
+        # Passwort korrekt
+        return True
+
+if not check_password():
+    st.stop() # Stoppt die App hier, wenn Passwort nicht okay
+
 # --- HILFSFUNKTIONEN ---
 def clean_column_names(df):
     df.columns = [re.sub(' +', ' ', c.strip()) for c in df.columns]
