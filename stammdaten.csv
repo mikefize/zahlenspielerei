@@ -1,10 +1,7 @@
-Modell,Hersteller,Gewicht (kg),Max. Drehmoment (Nm),Spannung,Besonderheit,Link_Artikel,Link_Youtube
-Bosch CX 4,Bosch,2.9,85,36,Der Klassiker,https://velomotion.de/2025/05/bosch-cx-gen5-upgrade-test/#gsc.tab=0,https://www.youtube.com/watch?v=JdCKI088crk
-Bosch CX 5 (100 Nm),Bosch,2.8,100,36,Performance Variante,https://velomotion.de/2025/05/bosch-cx-gen5-upgrade-test/#gsc.tab=0,https://www.youtube.com/watch?v=JdCKI088crk
-Shimano EP801,Shimano,2.6,85,36,Sehr kompakt,https://velomotion.de/2025/05/bosch-cx-gen5-upgrade-test/#gsc.tab=0,https://www.youtube.com/watch?v=JdCKI088crk
-Pinion MGU,Pinion,4.1,85,48,Getriebe integriert,https://velomotion.de/2025/05/bosch-cx-gen5-upgrade-test/#gsc.tab=0,https://www.youtube.com/watch?v=JdCKI088crk
-Specialized 2.2,Specialized,2.9,90,36,Riemenantrieb intern,https://velomotion.de/2025/05/bosch-cx-gen5-upgrade-test/#gsc.tab=0,https://www.youtube.com/watch?v=JdCKI088crk
-DJI Avinox,DJI,2.6,120,36,Hohe Powerdichte,https://velomotion.de/2025/05/bosch-cx-gen5-upgrade-test/#gsc.tab=0,https://www.youtube.com/watch?v=JdCKI088crk
-Specialized 3.1 S-Works,Specialized,3.2,111,50,,https://velomotion.de/2025/05/bosch-cx-gen5-upgrade-test/#gsc.tab=0,https://www.youtube.com/watch?v=JdCKI088crk
-Gobao P101,Gobao,2.9,100,36,,https://velomotion.de/2025/05/bosch-cx-gen5-upgrade-test/#gsc.tab=0,https://www.youtube.com/watch?v=JdCKI088crk
-Mahle M40,Mahle,2.5,105,48,,https://velomotion.de/2025/05/bosch-cx-gen5-upgrade-test/#gsc.tab=0,https://www.youtube.com/watch?v=JdCKI088crk
+Modell;Hersteller;Gewicht (kg);Max. Drehmoment (Nm);Systemspannung (V);Besonderheit
+Bosch CX 5 (85 Nm);Bosch;2.9;85;36;Der Klassiker
+Bosch CX 5 (100 Nm);Bosch;3.0;100;36;Performance Variante
+Shimano EP801;Shimano;2.7;85;36;Sehr kompakt
+Pinion MGU;Pinion;4.1;85;48;Getriebe integriert
+Specialized 2.2;Brose;2.9;90;36;Riemenantrieb intern
+DJI Avinox;DJI;2.5;105;43;Hohe Powerdichte
