@@ -26,29 +26,18 @@ def clean_column_names(df):
     return df
 
 def lighten_color(color, amount=0.5):
-    """
-    Macht eine Farbe heller.
-    Versteht Hex (#RRGGBB) und Plotly RGB Strings (rgb(r, g, b)).
-    """
+    """Macht eine Farbe heller (Hex oder RGB)"""
     try:
-        # 1. Versuch: Ist es ein Plotly RGB String? "rgb(255, 0, 12)"
         if isinstance(color, str) and color.startswith("rgb"):
-            # Zahlen extrahieren
             rgb = [int(x) for x in re.findall(r'\d+', color)]
-            # Auf 0-1 Skalieren für colorsys
             c_rgb = (rgb[0]/255.0, rgb[1]/255.0, rgb[2]/255.0)
         else:
-            # 2. Versuch: Ist es Hex oder Name? Matplotlib fragen
             c_rgb = mc.to_rgb(color)
-            
-        # Umrechnung
         c_hls = colorsys.rgb_to_hls(*c_rgb)
         new_lightness = max(0, min(1, amount * c_hls[1] + (1 - amount)))
         new_rgb = colorsys.hls_to_rgb(c_hls[0], new_lightness, c_hls[2])
         return mc.to_hex(new_rgb)
-        
-    except Exception:
-        # Fallback, falls irgendwas exotisches kommt: Einfach Grau zurückgeben
+    except:
         return "#CCCCCC"
 
 @st.cache_data
@@ -113,10 +102,9 @@ motors_all = set(df_leistung.columns[1:]) | set(df_kadenz.columns[1:])
 if df_thermik is not None: motors_all = motors_all | set([c for c in df_thermik.columns if c != 'Time'])
 all_motors = sorted(list(motors_all))
 
-# --- NEUE FARBPALETTE ---
+# --- FARBEN ---
 colors_palette = px.colors.qualitative.Bold + px.colors.qualitative.Prism + px.colors.qualitative.Vivid
 motor_color_map = {motor: colors_palette[i % len(colors_palette)] for i, motor in enumerate(all_motors)}
-
 idx_250 = (df_leistung[df_leistung.columns[0]] - 250).abs().idxmin()
 ref_power_map = df_leistung.loc[idx_250].to_dict()
 
@@ -190,7 +178,6 @@ if current_topic == "Motor-Steckbriefe":
         art, yt = gv("Link_Artikel"), gv("Link_Youtube")
         has_art = str(art).startswith("http")
         has_yt = str(yt).startswith("http")
-        
         if has_art or has_yt:
             st.markdown("---")
             st.subheader("Mehr erfahren")
@@ -203,7 +190,7 @@ if current_topic == "Motor-Steckbriefe":
                 if has_art:
                     st.markdown("**Testbericht:**")
                     st.write("Alle Details und Fazit im Artikel.")
-                    st.link_button("📄 Zum Artikel", art, type="primary") 
+                    st.link_button("📄 Zum Testbericht", art, type="primary") 
 
 # ==============================================================================
 # VERGLEICHS-TOOL
@@ -274,6 +261,7 @@ else:
                 fig_bar.update_layout(height=dynamic_height, showlegend=False)
                 st.plotly_chart(add_watermark(fig_bar, x=1, y=0, size=0.15, opacity=0.3, xanchor="right", yanchor="bottom"), use_container_width=True, config=plotly_config)
         else:
+            # THERMIK BALKEN - GRUPPIERT
             st.markdown("### 📉 Durchschnitt & Minimum (erste 15 Min)")
             start_t = df_chart[x_col].min()
             end_t = start_t + pd.Timedelta(minutes=15)
@@ -288,22 +276,42 @@ else:
             df_res = pd.DataFrame(data_list)
             if not df_res.empty:
                 df_res = df_res.sort_values(by="Avg", ascending=True)
-                dynamic_height = 200 + (len(valid_motors) * 60)
-
-                col_avg, col_min = st.columns(2)
-                with col_avg:
-                    st.markdown("**Durchschnitt**")
-                    fig_a = go.Figure(go.Bar(y=df_res["Motor"], x=df_res["Avg"], orientation='h', marker_color=df_res["ColorAvg"], text=df_res["Avg"].round(1), textposition='auto'))
-                    fig_a = lock_chart(fig_a)
-                    fig_a.update_layout(height=dynamic_height, yaxis={'categoryorder':'total ascending'}, margin=dict(l=0, r=0, t=10, b=0))
-                    st.plotly_chart(add_watermark(fig_a, x=1, y=0, size=0.15, opacity=0.3, xanchor="right", yanchor="bottom"), use_container_width=True, config=plotly_config)
                 
-                with col_min:
-                    st.markdown("**Minimum (Tiefpunkt)**")
-                    fig_m = go.Figure(go.Bar(y=df_res["Motor"], x=df_res["Min"], orientation='h', marker_color=df_res["ColorMin"], text=df_res["Min"].round(1), textposition='auto'))
-                    fig_m = lock_chart(fig_m)
-                    fig_m.update_yaxes(categoryorder='array', categoryarray=df_res["Motor"].tolist())
-                    fig_m.update_layout(height=dynamic_height, yaxis_showticklabels=False, margin=dict(l=0, r=0, t=10, b=0))
-                    st.plotly_chart(add_watermark(fig_m, x=1, y=0, size=0.15, opacity=0.3, xanchor="right", yanchor="bottom"), use_container_width=True, config=plotly_config)
+                # MANUELLER CHART MIT GRAPH OBJECTS
+                fig_bar = go.Figure()
+                
+                # Spur 1: Durchschnitt
+                fig_bar.add_trace(go.Bar(
+                    y=df_res["Motor"],
+                    x=df_res["Avg"],
+                    orientation='h',
+                    name="Durchschnitt",
+                    marker_color=df_res["ColorAvg"],
+                    text=df_res["Avg"].round(1),
+                    textposition='auto'
+                ))
+                
+                # Spur 2: Minimum
+                fig_bar.add_trace(go.Bar(
+                    y=df_res["Motor"],
+                    x=df_res["Min"],
+                    orientation='h',
+                    name="Minimum",
+                    marker_color=df_res["ColorMin"],
+                    text=df_res["Min"].round(1),
+                    textposition='auto'
+                ))
+                
+                dynamic_height = 200 + (len(valid_motors) * 60)
+                fig_bar = lock_chart(fig_bar)
+                fig_bar.update_layout(
+                    barmode='group', # Gruppiert (nebeneinander)
+                    height=dynamic_height, 
+                    xaxis_title=y_label,
+                    legend=dict(orientation="h", yanchor="bottom", y=1.02, xanchor="right", x=1),
+                    margin=dict(l=0, r=0, t=30, b=0)
+                )
+                
+                st.plotly_chart(add_watermark(fig_bar, x=1, y=0, size=0.15, opacity=0.3, xanchor="right", yanchor="bottom"), use_container_width=True, config=plotly_config)
 
     else: st.info("Keine Daten.")
