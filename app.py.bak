@@ -2,11 +2,9 @@ import streamlit as st
 import pandas as pd
 import plotly.express as px
 import plotly.graph_objects as go
-import base64
 import re
 import matplotlib.colors as mc
 import colorsys
-import os
 
 # --- KONFIGURATION & CLEAN LOOK ---
 st.set_page_config(page_title="E-Bike Motoren Prüfstand", layout="wide")
@@ -42,37 +40,23 @@ def lighten_color(color, amount=0.5):
 @st.cache_data
 def load_data(filename, index_col_name=None, sep=";", decimal=","):
     try:
-        df = pd.read_csv(filename, sep=sep, decimal=decimal, engine='python') # engine python für robustes Parsing
+        df = pd.read_csv(filename, sep=sep, decimal=decimal)
         df = clean_column_names(df)
-        
         if "15minuten" in filename or "20minuten" in filename:
             df.rename(columns={df.columns[0]: 'Time'}, inplace=True)
             df['Time'] = pd.to_datetime(df['Time'], format='%H:%M:%S', errors='coerce')
             df = df.dropna(subset=['Time'])
             return df
-
         if index_col_name:
             clean_idx = re.sub(' +', ' ', index_col_name.strip())
             if clean_idx in df.columns:
                 df = df.dropna(subset=[clean_idx])
             else:
                 df = df.dropna(subset=[df.columns[0]])
-        
-        if index_col_name != "Modell": 
-            cols = df.columns.drop(index_col_name) if index_col_name in df.columns else df.columns[1:]
-            df[cols] = df[cols].apply(pd.to_numeric, errors='coerce')
-            
+        if index_col_name != "Modell": df = df.apply(pd.to_numeric, errors='coerce')
         return df
     except FileNotFoundError:
         return None
-
-def add_watermark(fig, x=0.5, y=0.5, size=0.6, opacity=0.15, xanchor="center", yanchor="middle"):
-    try:
-        with open("logo.png", "rb") as image_file:
-            encoded_string = base64.b64encode(image_file.read()).decode()
-        fig.add_layout_image(dict(source=f"data:image/png;base64,{encoded_string}", xref="paper", yref="paper", x=x, y=y, sizex=size, sizey=size, xanchor=xanchor, yanchor=yanchor, opacity=opacity, layer="below"))
-    except: pass
-    return fig
 
 def lock_chart(fig):
     fig.update_xaxes(fixedrange=True)
@@ -89,7 +73,7 @@ plotly_config = {
 # --- DATEN LADEN ---
 df_leistung = load_data("leistung.csv", "Eingangsleistung")
 df_kadenz = load_data("kadenz.csv", "Kadenz")
-df_stammdaten = load_data("stammdaten.csv", "Modell")
+# df_stammdaten wird hier nicht mehr benötigt
 df_therm_15 = load_data("15minuten.csv")
 df_therm_20 = load_data("20minuten.csv")
 
@@ -109,11 +93,8 @@ all_motors = sorted(list(motors_all))
 colors_palette = px.colors.qualitative.Bold + px.colors.qualitative.Prism + px.colors.qualitative.Vivid
 motor_color_map = {motor: colors_palette[i % len(colors_palette)] for i, motor in enumerate(all_motors)}
 
-try:
-    idx_250 = (df_leistung[df_leistung.columns[0]] - 250).abs().idxmin()
-    ref_power_map = df_leistung.loc[idx_250].to_dict()
-except:
-    ref_power_map = {}
+idx_250 = (df_leistung[df_leistung.columns[0]] - 250).abs().idxmin()
+ref_power_map = df_leistung.loc[idx_250].to_dict()
 
 if 'active_view' not in st.session_state: st.session_state.active_view = "Leistungskurven"
 if 'stored_selection' not in st.session_state: st.session_state.stored_selection = all_motors 
@@ -130,213 +111,106 @@ def nav_button(label, view_name):
 nav_button("Leistungskurven (Input)", "Leistungskurven")
 nav_button("Kadenz-Verlauf (RPM)", "Kadenz-Verlauf")
 nav_button("Thermisches Derating", "Thermik")
-st.sidebar.markdown("---")
-nav_button("Motor-Steckbriefe", "Motor-Steckbriefe")
 
 current_topic = st.session_state.active_view
 
 # ==============================================================================
-# MOTOR STECKBRIEFE
+# VERGLEICHS-TOOL (Jetzt die einzige Ansicht)
 # ==============================================================================
-if current_topic == "Motor-Steckbriefe":
-    st.title("📝 Motor-Steckbrief")
-    c_sel, _ = st.columns([1, 2])
-    with c_sel: selected_single = st.selectbox("Motor wählen:", all_motors)
-    st.markdown("---")
+st.title(f"📊 Vergleich: {current_topic}")
+
+with st.container():
+    c_mot, c_set = st.columns([3, 1])
+    with c_mot:
+        st.multiselect("Motoren auswählen:", options=all_motors, default=st.session_state.stored_selection, key="widget_selection", on_change=update_selection)
+        selected_motors = st.session_state.stored_selection
+    df_chart = None
+    x_col, x_label, y_label = "", "", "Leistung (Watt)"
+    with c_set:
+        if current_topic == "Leistungskurven":
+            min_v, max_v = int(df_leistung.iloc[:, 0].min()), int(df_leistung.iloc[:, 0].max())
+            val = st.slider("Input (Watt)", min_v, max_v, (min_v, max_v))
+            mask = (df_leistung.iloc[:, 0] >= val[0]) & (df_leistung.iloc[:, 0] <= val[1])
+            df_chart = df_leistung.loc[mask]
+            x_col, x_label = df_leistung.columns[0], "Eingangsleistung (Watt)"
+        elif current_topic == "Kadenz-Verlauf":
+            min_v, max_v = int(df_kadenz.iloc[:, 0].min()), int(df_kadenz.iloc[:, 0].max())
+            val = st.slider("Kadenz (RPM)", min_v, max_v, (min_v, max_v))
+            mask = (df_kadenz.iloc[:, 0] >= val[0]) & (df_kadenz.iloc[:, 0] <= val[1])
+            df_chart = df_kadenz.loc[mask]
+            x_col, x_label = df_kadenz.columns[0], "Kadenz (RPM)"
+        elif current_topic == "Thermik":
+            if df_thermik is not None:
+                unit = st.radio("Einheit:", ["% Derating (Relativ)", "Absolute Leistung (Watt)"])
+                df_chart = df_thermik.copy()
+                x_col, x_label = "Time", "Zeit (mm:ss)"
+                if "Watt" in unit:
+                    y_label = "Leistung (Watt bei 250W Input)"
+                    for m in selected_motors:
+                        if m in df_chart.columns and m in ref_power_map:
+                            df_chart[m] = (df_chart[m] / 100) * ref_power_map[m]
+                else: y_label = "Leistung (% vom Startwert)"
+            else: st.warning("Keine Thermik-Daten.")
+st.markdown("---")
+
+if not selected_motors: 
+    st.stop()
+
+valid_motors = [m for m in selected_motors if m in df_chart.columns]
+
+if valid_motors:
+    # 1. HAUPTDIAGRAMM
+    fig = px.line(df_chart, x=x_col, y=valid_motors, labels={x_col: x_label, "value": y_label, "variable": "Motor"}, color_discrete_map=motor_color_map)
+    if current_topic == "Thermik": fig.update_xaxes(tickformat="%M:%S")
     
-    meta_data_found = False
+    fig = lock_chart(fig) 
+    fig.update_layout(hovermode="x unified", height=600, legend=dict(orientation="h", yanchor="bottom", y=1.02, xanchor="right", x=1))
+    st.plotly_chart(fig, use_container_width=True, config=plotly_config)
     
-    if df_stammdaten is not None:
-        meta = df_stammdaten[df_stammdaten["Modell"] == selected_single]
-        if not meta.empty:
-            meta_data_found = True
-            def gv(c): return meta.iloc[0][c] if c in meta.columns else "-"
-
-            # OBERER BEREICH: Beschreibung (Links) + Bild (Rechts)
-            col_desc, col_img = st.columns([2, 1])
-            
-            with col_desc:
-                # Beschreibung
-                desc = gv("Beschreibung")
-                if desc != "-" and pd.notna(desc):
-                    st.info(desc)
-                
-                # KENNZAHLEN (Jetzt in einer Reihe unter der Beschreibung)
-                kpi1, kpi2, kpi3 = st.columns(3)
-                with kpi1: st.metric("Gewicht", f"{gv('Gewicht (kg)')} kg")
-                with kpi2: st.metric("Max. Drehmoment", f"{gv('Max. Drehmoment (Nm)')} Nm")
-                
-                # Max Leistung (Berechnet aus Messdaten)
-                max_p = 0
-                if selected_single in df_leistung.columns:
-                    max_p = df_leistung[selected_single].max()
-                with kpi3: st.metric("Max. Leistung (gemessen)", f"{max_p:.0f} W" if max_p > 0 else "-")
-
-                # Link Hersteller
-                link_web = gv("Link_Hersteller")
-                if link_web != "-" and str(link_web).startswith("http"):
-                    st.caption(f"[🌐 Zur Herstellerseite]({link_web})")
-
-            with col_img:
-                # BILD ANZEIGEN
-                img_file = gv("Bild")
-                if img_file != "-" and pd.notna(img_file):
-                    if os.path.exists(img_file):
-                        st.image(img_file, use_container_width=True)
-            
-            st.markdown("---")
-
-    # 3. DIAGRAMME
-    st.subheader("Messdaten")
-    cL, cK, cT = st.columns(3)
-    motor_color = motor_color_map.get(selected_single, "blue")
+    csv = df_chart[[x_col] + valid_motors].to_csv(index=False, sep=";", decimal=",").encode('utf-8')
+    st.download_button("💾 CSV Export", csv, "export.csv", "text/csv")
     
-    with cL:
-        if selected_single in df_leistung.columns:
-            fig = px.line(df_leistung, x=df_leistung.columns[0], y=selected_single, title="Leistungskurve")
-            fig.update_traces(fill='tozeroy', line_color=motor_color)
-            fig = lock_chart(add_watermark(fig))
-            st.plotly_chart(fig, use_container_width=True, config=plotly_config)
-            
-    with cK:
-        if selected_single in df_kadenz.columns:
-            fig = px.line(df_kadenz, x=df_kadenz.columns[0], y=selected_single, title="Kadenzverlauf")
-            fig.update_traces(fill='tozeroy', line_color=motor_color)
-            fig = lock_chart(add_watermark(fig))
-            st.plotly_chart(fig, use_container_width=True, config=plotly_config)
-            
-    with cT:
-        if df_thermik is not None and selected_single in df_thermik.columns:
-             start_t = df_thermik["Time"].min()
-             end_t = start_t + pd.Timedelta(minutes=15)
-             df_15 = df_thermik[(df_thermik["Time"] >= start_t) & (df_thermik["Time"] <= end_t)]
-             fig = px.line(df_15, x="Time", y=selected_single, title="Thermik (15 min)")
-             fig.update_traces(fill='tozeroy', line_color=motor_color)
-             fig.update_xaxes(tickformat="%M:%S")
-             fig = lock_chart(add_watermark(fig))
-             st.plotly_chart(fig, use_container_width=True, config=plotly_config)
-
-    # 4. ZUSATZDATEN
-    support_filename = f"support_{selected_single}.csv"
-    if os.path.exists(support_filename):
-        df_support = load_data(support_filename)
-        if df_support is not None and not df_support.empty:
-            st.subheader("Unterstützungsstufen")
-            fig_sup = px.line(df_support, x=df_support.columns[0], y=df_support.columns[1:])
-            fig_sup = lock_chart(add_watermark(fig_sup))
-            st.plotly_chart(fig_sup, use_container_width=True, config=plotly_config)
-
-    # 5. MEDIEN
-    if meta_data_found:
-        art, yt = gv("Link_Artikel"), gv("Link_Youtube")
-        has_art = str(art).startswith("http")
-        has_yt = str(yt).startswith("http")
+    # 2. DETAIL BEREICH
+    if current_topic != "Thermik":
+        st.markdown("### 🔍 Detail-Vergleich")
+        c1, c2 = st.columns([1, 2])
+        min_c, max_c = int(df_chart[x_col].min()), int(df_chart[x_col].max())
+        with c1:
+            st.markdown(" ")
+            target = st.slider(f"Punkt ({x_label})", min_c, max_c, int((min_c+max_c)/2))
+        with c2:
+            row = df_chart.loc[(df_chart[x_col] - target).abs().idxmin()]
+            bar_data = pd.DataFrame([{"Motor": m, "Wert": row[m]} for m in valid_motors])
+            fig_bar = px.bar(bar_data, x="Wert", y="Motor", color="Motor", orientation='h', text_auto='.1f', color_discrete_map=motor_color_map)
+            fig_bar.update_yaxes(categoryorder='total ascending')
+            dynamic_height = max(400, len(valid_motors) * 40)
+            fig_bar = lock_chart(fig_bar)
+            fig_bar.update_layout(height=dynamic_height, showlegend=False)
+            st.plotly_chart(fig_bar, use_container_width=True, config=plotly_config)
+    else:
+        # THERMIK BALKEN (AVG & MIN)
+        st.markdown("### 📉 Durchschnitt & Minimum (erste 15 Min)")
+        start_t = df_chart[x_col].min()
+        end_t = start_t + pd.Timedelta(minutes=15)
+        df_15 = df_chart[(df_chart[x_col] >= start_t) & (df_chart[x_col] <= end_t)]
         
-        if has_art or has_yt:
-            st.markdown("---")
-            st.subheader("Mehr erfahren")
-            m1, m2, m3 = st.columns([1, 1, 2]) 
-            with m1:
-                if has_yt:
-                    st.markdown("**Video-Test:**")
-                    st.video(yt)
-            with m2:
-                if has_art:
-                    st.markdown("**Testbericht:**")
-                    st.write("Alle Details und Fazit im Artikel.")
-                    st.link_button("📄 Zum Testbericht", art, type="primary") 
-
-# ==============================================================================
-# VERGLEICHS-TOOL
-# ==============================================================================
-else:
-    st.title(f"📊 Vergleich: {current_topic}")
-    with st.container():
-        c_mot, c_set = st.columns([3, 1])
-        with c_mot:
-            st.multiselect("Motoren auswählen:", options=all_motors, default=st.session_state.stored_selection, key="widget_selection", on_change=update_selection)
-            selected_motors = st.session_state.stored_selection
-        df_chart = None
-        x_col, x_label, y_label = "", "", "Leistung (Watt)"
-        with c_set:
-            if current_topic == "Leistungskurven":
-                min_v, max_v = int(df_leistung.iloc[:, 0].min()), int(df_leistung.iloc[:, 0].max())
-                val = st.slider("Input (Watt)", min_v, max_v, (min_v, max_v))
-                mask = (df_leistung.iloc[:, 0] >= val[0]) & (df_leistung.iloc[:, 0] <= val[1])
-                df_chart = df_leistung.loc[mask]
-                x_col, x_label = df_leistung.columns[0], "Eingangsleistung (Watt)"
-            elif current_topic == "Kadenz-Verlauf":
-                min_v, max_v = int(df_kadenz.iloc[:, 0].min()), int(df_kadenz.iloc[:, 0].max())
-                val = st.slider("Kadenz (RPM)", min_v, max_v, (min_v, max_v))
-                mask = (df_kadenz.iloc[:, 0] >= val[0]) & (df_kadenz.iloc[:, 0] <= val[1])
-                df_chart = df_kadenz.loc[mask]
-                x_col, x_label = df_kadenz.columns[0], "Kadenz (RPM)"
-            elif current_topic == "Thermik":
-                if df_thermik is not None:
-                    unit = st.radio("Einheit:", ["% Derating (Relativ)", "Absolute Leistung (Watt)"])
-                    df_chart = df_thermik.copy()
-                    x_col, x_label = "Time", "Zeit (mm:ss)"
-                    if "Watt" in unit:
-                        y_label = "Leistung (Watt bei 250W Input)"
-                        for m in selected_motors:
-                            if m in df_chart.columns and m in ref_power_map:
-                                df_chart[m] = (df_chart[m] / 100) * ref_power_map[m]
-                    else: y_label = "Leistung (% vom Startwert)"
-                else: st.warning("Keine Thermik-Daten.")
-    st.markdown("---")
-    if not selected_motors: st.stop()
-    valid_motors = [m for m in selected_motors if m in df_chart.columns]
-    if valid_motors:
-        fig = px.line(df_chart, x=x_col, y=valid_motors, labels={x_col: x_label, "value": y_label, "variable": "Motor"}, color_discrete_map=motor_color_map)
-        if current_topic == "Thermik": fig.update_xaxes(tickformat="%M:%S")
+        data_list = []
+        for m in valid_motors:
+            base_c = motor_color_map.get(m, "#000000")
+            light_c = lighten_color(base_c, 0.5)
+            data_list.append({"Motor": m, "Avg": df_15[m].mean(), "Min": df_15[m].min(), "ColorAvg": base_c, "ColorMin": light_c})
         
-        fig = add_watermark(fig, size=0.6, opacity=0.15)
-        fig = lock_chart(fig) 
-        fig.update_layout(hovermode="x unified", height=600, legend=dict(orientation="h", yanchor="bottom", y=1.02, xanchor="right", x=1))
-        st.plotly_chart(fig, use_container_width=True, config=plotly_config)
-        
-        csv = df_chart[[x_col] + valid_motors].to_csv(index=False, sep=";", decimal=",").encode('utf-8')
-        st.download_button("💾 CSV Export", csv, "export.csv", "text/csv")
-        
-        if current_topic != "Thermik":
-            st.markdown("### 🔍 Detail-Vergleich")
-            c1, c2 = st.columns([1, 2])
-            min_c, max_c = int(df_chart[x_col].min()), int(df_chart[x_col].max())
-            with c1:
-                st.markdown(" ")
-                target = st.slider(f"Punkt ({x_label})", min_c, max_c, int((min_c+max_c)/2))
-            with c2:
-                row = df_chart.loc[(df_chart[x_col] - target).abs().idxmin()]
-                bar_data = pd.DataFrame([{"Motor": m, "Wert": row[m]} for m in valid_motors])
-                fig_bar = px.bar(bar_data, x="Wert", y="Motor", color="Motor", orientation='h', text_auto='.1f', color_discrete_map=motor_color_map)
-                fig_bar.update_yaxes(categoryorder='total ascending')
-                dynamic_height = max(400, len(valid_motors) * 40)
-                fig_bar = lock_chart(fig_bar)
-                fig_bar.update_layout(height=dynamic_height, showlegend=False)
-                st.plotly_chart(add_watermark(fig_bar, x=1, y=0, size=0.15, opacity=0.3, xanchor="right", yanchor="bottom"), use_container_width=True, config=plotly_config)
-        else:
-            st.markdown("### 📉 Durchschnitt & Minimum (erste 15 Min)")
-            start_t = df_chart[x_col].min()
-            end_t = start_t + pd.Timedelta(minutes=15)
-            df_15 = df_chart[(df_chart[x_col] >= start_t) & (df_chart[x_col] <= end_t)]
+        df_res = pd.DataFrame(data_list)
+        if not df_res.empty:
+            df_res = df_res.sort_values(by="Avg", ascending=True)
             
-            data_list = []
-            for m in valid_motors:
-                base_c = motor_color_map.get(m, "#000000")
-                light_c = lighten_color(base_c, 0.5)
-                data_list.append({"Motor": m, "Avg": df_15[m].mean(), "Min": df_15[m].min(), "ColorAvg": base_c, "ColorMin": light_c})
+            fig_bar = go.Figure()
+            fig_bar.add_trace(go.Bar(y=df_res["Motor"], x=df_res["Avg"], orientation='h', name="Durchschnitt", marker_color=df_res["ColorAvg"], text=df_res["Avg"].round(1), textposition='auto'))
+            fig_bar.add_trace(go.Bar(y=df_res["Motor"], x=df_res["Min"], orientation='h', name="Minimum", marker_color=df_res["ColorMin"], text=df_res["Min"].round(1), textposition='auto'))
             
-            df_res = pd.DataFrame(data_list)
-            if not df_res.empty:
-                df_res = df_res.sort_values(by="Avg", ascending=True)
-                dynamic_height = 200 + (len(valid_motors) * 50)
+            fig_bar = lock_chart(fig_bar)
+            dynamic_height = 200 + (len(valid_motors) * 50)
+            fig_bar.update_layout(barmode='group', height=dynamic_height, xaxis_title=y_label, legend=dict(orientation="h", yanchor="bottom", y=1.02, xanchor="right", x=1), margin=dict(l=0, r=0, t=30, b=0))
+            st.plotly_chart(fig_bar, use_container_width=True, config=plotly_config)
 
-                fig_bar = go.Figure()
-                fig_bar.add_trace(go.Bar(y=df_res["Motor"], x=df_res["Avg"], orientation='h', name="Durchschnitt", marker_color=df_res["ColorAvg"], text=df_res["Avg"].round(1), textposition='auto'))
-                fig_bar.add_trace(go.Bar(y=df_res["Motor"], x=df_res["Min"], orientation='h', name="Minimum", marker_color=df_res["ColorMin"], text=df_res["Min"].round(1), textposition='auto'))
-                
-                fig_bar = lock_chart(fig_bar)
-                fig_bar.update_layout(barmode='group', height=dynamic_height, xaxis_title=y_label, legend=dict(orientation="h", yanchor="bottom", y=1.02, xanchor="right", x=1), margin=dict(l=0, r=0, t=30, b=0))
-                st.plotly_chart(add_watermark(fig_bar, x=1, y=0, size=0.15, opacity=0.3, xanchor="right", yanchor="bottom"), use_container_width=True, config=plotly_config)
-
-    else: st.info("Keine Daten.")
+else: st.info("Keine Daten.")
