@@ -203,7 +203,7 @@ if valid_motors:
             st.plotly_chart(fig_bar, use_container_width=True, config=plotly_config)
     else:
         # THERMIK BALKEN (AVG & MIN)
-        st.markdown("### 📉 Durchschnitt & Minimum (erste 15 Min)")
+        st.markdown("### 📉 Durchschnitt & Minimum (20 Minuten)")
         start_t = df_chart[x_col].min()
         end_t = start_t + pd.Timedelta(minutes=15)
         df_15 = df_chart[(df_chart[x_col] >= start_t) & (df_chart[x_col] <= end_t)]

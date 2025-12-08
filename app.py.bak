@@ -119,6 +119,20 @@ current_topic = st.session_state.active_view
 # ==============================================================================
 st.title(f"📊 Vergleich: {current_topic}")
 
+# --- NEU: TESTPARAMETER EXPANDER ---
+param_text = ""
+if current_topic == "Leistungskurven":
+    param_text = "Kadenz 75 rpm, Fahrergewicht 80 kg, höchste Unterstützungsstufe, Standard-Settings in der App, Geschwindigkeit 20 km/h"
+elif current_topic == "Kadenz-Verlauf":
+    param_text = "Eingangsleistung 250 W, Fahrergewicht 80 kg, höchste Unterstützungsstufe, Standard-Settings in der App"
+elif current_topic == "Thermik":
+    param_text = "Eingangsleistung 250 W, Fahrergewicht 80 kg, höchste Unterstützungsstufe, Standard-Settings in der App, Raumtemperatur ca. 20°C, 10% Steigung (simuliert), Kühlung durch Industrielüfter"
+
+if param_text:
+    with st.expander("ℹ️ Testparameter & Hintergründe"):
+        st.write(param_text)
+# -----------------------------------
+
 with st.container():
     c_mot, c_set = st.columns([3, 1])
     with c_mot:
