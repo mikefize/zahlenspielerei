@@ -124,7 +124,7 @@ param_text = ""
 if current_topic == "Leistungskurven":
     param_text = "Kadenz 75 rpm, Fahrergewicht 80 kg, höchste Unterstützungsstufe, Standard-Settings in der App, Geschwindigkeit 20 km/h"
 elif current_topic == "Kadenz-Verlauf":
-    param_text = "Eingangsleistung 250 W, Fahrergewicht 80 kg, höchste Unterstützungsstufe, Standard-Settings in der App"
+    param_text = "Eingangsleistung 130 W, Fahrergewicht 80 kg, höchste Unterstützungsstufe, Standard-Settings in der App"
 elif current_topic == "Thermik":
     param_text = "Eingangsleistung 250 W, Fahrergewicht 80 kg, höchste Unterstützungsstufe, Standard-Settings in der App, Raumtemperatur ca. 20°C, 10% Steigung (simuliert), Kühlung durch Industrielüfter"
 
